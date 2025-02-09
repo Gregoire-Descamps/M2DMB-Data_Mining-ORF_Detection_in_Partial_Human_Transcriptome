@@ -192,7 +192,7 @@ class ORFExtractor:
     def __aggregate_overlapping_orf(self):
         """
         Aggregate all ORF of the sequence to remove overlapping ORF
-        :return: None
+        :return: None .
         """
         while len(self.__seq_orf_list) > 1:
             non_overlapping_orf: list[ORF] = []

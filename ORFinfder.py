@@ -1,9 +1,13 @@
+import FileFormats
 from typing import Union, Self
 import logging
 
 from Bio import SeqIO, SeqRecord
 from Bio.Seq import Seq
 from Bio.Data.CodonTable import standard_dna_table
+
+from FileFormats import GffFile, FastaFile
+
 
 
 # logging config
@@ -294,6 +298,20 @@ class ORFExtractor:
 
         return self.ORF_dict
 
+    def result_export(self,
+                     output_name: str):
+        """
+        Create gff and multifasta files with all the extracted ORF
+
+        Args:
+            output_name: Name for the generated files
+        """
+        gffFile = GffFile(output_name+".gff")
+        fastaFile = FastaFile(output_name + ".fasta")
+
+        gffFile.write_orf_file(self.ORF_list)
+        fastaFile.write_orf_file(self.ORF_list)
+
 
 class ORF:
     """
@@ -365,5 +383,7 @@ class ORF:
                 self.frame[0],
                 int(self.frame[-1]) - 1,
                 {"ID": self.id})
+
+
 
 

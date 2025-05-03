@@ -1,12 +1,14 @@
 from matplotlib import pyplot as plt
-
 from ORFinfder import ORFExtractor
-from FileFormats import GffFile
+
 
 fastaFileName = "Homo_sapiens_cdna_assembed.fasta"
-outputFileName = "ORF_extracted.gff"
+outputFileName = "ORF_extracted"
+
 fasta_to_ORF = ORFExtractor(fastaFileName)
 ORF_Dict = fasta_to_ORF.extract()
+fasta_to_ORF.result_export(outputFileName)
+
 max_length_dict = {}
 for key, tup in ORF_Dict.items():
 
@@ -28,7 +30,6 @@ print(f'number orf ORF : {len(ORF_Dict.keys())}')
 plt.hist(x=global_length_dict.values(), bins=range(1000))
 plt.show()
 
-outputFile = GffFile(outputFileName)
-outputFile.write_orf_file(fasta_to_ORF.ORF_list)
+
 
 

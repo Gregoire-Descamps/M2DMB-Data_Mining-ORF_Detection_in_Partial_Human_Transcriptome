@@ -1,0 +1,2 @@
+matplotlib~=3.7.1
+biopython~=1.81

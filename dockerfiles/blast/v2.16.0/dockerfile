@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+RUN apt-get update && \
+apt-get install -y wget
+RUN pip install --upgrade pip
+WORKDIR /app
+RUN wget https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/ncbi-blast-2.16.0+-x64-linux.tar.gz && \
+tar -xzvf ncbi-blast-2.16.0+-x64-linux.tar.gz && \
+mv ncbi-blast-2.16.0+ /usr/local/ && \
+rm ncbi-blast-2.16.0+-x64-linux.tar.gz
+
+ENV PATH="/usr/local/ncbi-blast-2.16.0+/bin:$PATH"
+
+RUN wget https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz && \
+wget https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/reldate.txt && \
+gunzip uniprot_sprot.fasta.gz && \
+mkdir -p /db/uniprot && mv uniprot_sprot.fasta /db/uniprot && mv reldate.txt /db/uniprot
+COPY . /app
+RUN pip install -r requirements.txt

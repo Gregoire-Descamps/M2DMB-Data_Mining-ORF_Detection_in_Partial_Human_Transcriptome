@@ -113,7 +113,7 @@ class GffFile:
             attributes = new_attributes[1:]
         if not open_file:
             with self.__open_file() as file:
-                file.write(f'{seqid}\t{source}\t{seq_type}\t{start}\t{end}\t{score}\t\t{strand}\t{phase}\t{attributes}\n')
+                file.write(f'{seqid}\t{source}\t{seq_type}\t{start}\t{end}\t{score}\t{strand}\t{phase}\t{attributes}\n')
 
             file.close()
         else:

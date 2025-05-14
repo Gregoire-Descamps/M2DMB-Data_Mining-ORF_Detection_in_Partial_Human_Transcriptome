@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 RUN apt-get update && \
-apt-get install -y wget
+apt-get install -y wget &&\
+apt-get install -y libgomp1
 RUN pip install --upgrade pip
 WORKDIR /app
 RUN wget https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/ncbi-blast-2.16.0+-x64-linux.tar.gz && \
@@ -10,9 +11,9 @@ rm ncbi-blast-2.16.0+-x64-linux.tar.gz
 
 ENV PATH="/usr/local/ncbi-blast-2.16.0+/bin:$PATH"
 
-RUN wget https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz && \
-wget https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/reldate.txt && \
-gunzip uniprot_sprot.fasta.gz && \
-mkdir -p /db/uniprot && mv uniprot_sprot.fasta /db/uniprot && mv reldate.txt /db/uniprot
+RUN wget https://ftp.ncbi.nlm.nih.gov/blast/db/v5/swissprot.tar.gz && \
+    mkdir -p /db/swissprot && mv swissprot* /db/swissprot && \
+    tar -xzvf /db/swissprot/swissprot.tar.gz -C /db/swissprot
+
 COPY . /app
 RUN pip install -r requirements.txt

@@ -165,9 +165,9 @@ class ORFExtractor:
                 end_pos = stop_pos_list[0] + 2
                 # only process orf longer than trigger
                 if end_pos - init_pos > trigger:
+                    # extract alternative starts in the ORF
                     while start_pos_list and start_pos_list[0] < end_pos:
-                        alt_start.append(start_pos_list[0])
-                        start_pos_list.pop(0)
+                        alt_start.append(start_pos_list.pop(0))
                     if frame[0] == "+":
                         orf_seq = seq.seq[init_pos:end_pos + 1]
                         self.__seq_orf_list.append(ORF(Seq(orf_seq), seq.id, init_pos + 1, end_pos + 1, frame))
@@ -178,7 +178,7 @@ class ORFExtractor:
                         self.__seq_orf_list[-1].add_alt_start(alt_start)
 
                     else:
-                        orf_seq = rev_seq.seq[init_pos:end_pos + 3]
+                        orf_seq = rev_seq.seq[init_pos:end_pos + 1]
                         self.__seq_orf_list.append(
                             ORF(Seq(orf_seq), seq.id, len(seq) - end_pos, len(seq) - init_pos, frame))
                         # self.__add_orf_to_dict(orf_seq, seq.id, len(seq) - end_pos, len(seq) - init_pos, frame)

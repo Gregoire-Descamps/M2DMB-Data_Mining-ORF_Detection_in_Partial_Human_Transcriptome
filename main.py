@@ -3,7 +3,7 @@ from ORFinfder import ORFExtractor
 
 
 fastaFileName = "Homo_sapiens_cdna_assembed.fasta"
-outputFileName = "/analysi/output/ORF_extracted"
+outputFileName = "/analysis/output/ORF_extracted"
 
 fasta_to_ORF = ORFExtractor(fastaFileName)
 ORF_Dict = fasta_to_ORF.extract()
@@ -28,8 +28,8 @@ print(f"Contig(s) missing ORF : {fasta_to_ORF.non_orf_seq}")
 print(sorted(max_length_dict.items(), key=lambda i: i[1])[-5:])
 print(f'number orf ORF : {len(ORF_Dict.keys())}')
 plt.hist(x=global_length_dict.values(), bins=range(1000))
-plt.savefig("/analysi/output/orf_length_distribution")
+plt.savefig("/analysis/output/orf_length_distribution")
 
-
+# command for blastx : blastx -db /db/swissprot -query /analysis/output/ORF_extracted.fasta -taxids 9606 -evalue 0.05 -outfmt 7 -out /analysis/output/blast_results.tsv
 
 

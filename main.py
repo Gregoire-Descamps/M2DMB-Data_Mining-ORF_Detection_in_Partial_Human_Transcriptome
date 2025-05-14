@@ -4,10 +4,14 @@ from ORFinfder import ORFExtractor
 
 fastaFileName = "Homo_sapiens_cdna_assembed.fasta"
 outputFileName = "/analysis/output/ORF_extracted"
+blastoutput = "/analysis/output/blast_results.tsv"
+blastdb = "/db/swissprot/swissprot"
+
 
 fasta_to_ORF = ORFExtractor(fastaFileName)
 ORF_Dict = fasta_to_ORF.extract()
 fasta_to_ORF.result_export(outputFileName)
+# fasta_to_ORF.blastx(database=blastdb, outputfile=blastoutput, taxids=9606, evalue=0.05, outfmt=7)
 
 max_length_dict = {}
 for key, tup in ORF_Dict.items():

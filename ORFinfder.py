@@ -5,6 +5,9 @@ import logging
 from Bio import SeqIO, SeqRecord
 from Bio.Seq import Seq
 from Bio.Data.CodonTable import standard_dna_table
+from Bio.Application import _Option
+from Bio.Blast.Applications import NcbiblastxCommandline
+
 
 from FileFormats import GffFile, FastaFile
 
@@ -26,6 +29,7 @@ class ORFExtractor:
         self.ORF_dict = {}
         self.ORF_list: list[ORF] = []
         self.non_orf_seq = 0
+        self.output = None
 
     def _load_seqio_fasta(self,
                           file: str,
@@ -311,6 +315,44 @@ class ORFExtractor:
 
         gffFile.write_orf_file(self.ORF_list)
         fastaFile.write_orf_file(self.ORF_list)
+        self.output = output_name
+
+    def blastx(self, database: str, outputfile: str, **kwargs):
+        """
+        Run a blastx against the source fasta file using Biopython NcbitblastxCommandline
+
+        Args:
+            database: path to the blast database (should be a directory and not a file)
+            outputfile: results output path
+            **kwargs: arguments used to run Blastx see https://www.ncbi.nlm.nih.gov/books/NBK279684/#appendices.Options_for_the_commandline_a for the Ncbi command line arguments
+                    and https://biopython.org/docs/1.76/api/Bio.Blast.Applications.html for the biopython documentation
+
+        Returns: class:tuple (STDOUT,STDERR)
+
+        """
+        if not self.output:
+            raise Exception("Unable to find an output file use extract method to generate the corresponding fasta file")
+
+        # add the taxids argument as extra parameter
+        extra_parameters = []
+        if "taxids" in kwargs.keys() or "-taxids" in kwargs.keys():
+
+            extra_parameters.append(_Option(
+                ["-taxids", "taxids"],
+                "Filtering algorithm for soft masking (integer).\n\n"
+                "Filtering algorithm ID to apply to BLAST database as soft masking. "
+                "Incompatible with: db_hard_mask, subject, subject_loc",
+                equate=False,
+            ))
+
+        # add parameters to the biopython blastx object
+        bio_blast = NcbiblastxCommandline(query=self.output+".fasta", db = database, out=outputfile)
+        bio_blast.parameters = bio_blast.parameters + extra_parameters
+
+        for key, value in kwargs.items():
+            bio_blast.set_parameter(key, value)
+
+        return bio_blast()
 
 
 class ORF:

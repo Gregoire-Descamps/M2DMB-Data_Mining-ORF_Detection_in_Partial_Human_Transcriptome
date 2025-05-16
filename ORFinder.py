@@ -8,13 +8,11 @@ from Bio.Data.CodonTable import standard_dna_table
 from Bio.Application import _Option
 from Bio.Blast.Applications import NcbiblastxCommandline
 
-
 from FileFormats import GffFile, FastaFile
-
-
 
 # logging config
 logging.basicConfig(level=logging.DEBUG)
+
 
 class ORFExtractor:
 
@@ -28,6 +26,7 @@ class ORFExtractor:
         self.seqIO: SeqIO.Iterable = self._load_seqio_fasta(file, "fasta")
         self.ORF_dict = {}
         self.ORF_list: list[ORF] = []
+        self.__seq_orf_list: list[ORF] = []
         self.non_orf_seq = 0
         self.output = None
 
@@ -232,26 +231,12 @@ class ORFExtractor:
         if len(self.__seq_orf_list) > 0:
             raise Exception("remaining sequences in the list at the end of aggregation, this shouldn't be the case")
 
-    def __add_orf_to_dict(self,
-                          id: str,
-                          seq: str,
-                          src: str,
-                          start_pos: int,
-                          stop_pos: int,
-                          frame: str):
+    def __add_orf_to_dict(self, orf: ORF):
         """
-        Add ORF information into the ORF dict
-        :param seq: The ID string of the ORF
-        :param seq: The string of the complete sequence of the ORF
-        :param src: The id of the contig or the source sequence the ORF is found in
-        :param start_pos: The first base position of the ORF, should be in the positive strand direction,
-            (3' -> 5' or 5' -> 3' for negative strand) and the indexes should range from 1 to N.
-        :param stop_pos: The last base position of the ORF, should be in the positive strand direction,
-            (3' -> 5' or 5' -> 3' for negative strand) and the indexes should range from 1 to N.
-        :param frame:
-        :return:
+        Add ORF object into the ORF dict
         """
-        self.ORF_dict[id] = (seq, stop_pos - start_pos + 1, src, (start_pos, stop_pos), frame)
+
+        self.ORF_dict[orf.id] = orf
 
     def extract(self):
         """
@@ -262,7 +247,7 @@ class ORFExtractor:
         max_seq_length = 0
         for seq in self.seqIO:  # type: SeqRecord.SeqRecord
             rev_seq: SeqRecord = seq.reverse_complement()
-            self.__seq_orf_list: list[ORF] = []
+            self.__seq_orf_list = []
             if len(seq.seq) > max_seq_length:
                 max_seq_name = seq.id
                 max_seq_length = len(seq.seq)
@@ -297,13 +282,15 @@ class ORFExtractor:
         i = 1
         for orf in self.ORF_list:
             orf.id = "ORF_" + str(i)
-            self.__add_orf_to_dict(*orf.to_dict_tuple())
+            self.__add_orf_to_dict(orf)
             i += 1
 
+        # delete ORF list to release memory
+        self.ORF_list = []
+        
         return self.ORF_dict
 
-    def result_export(self,
-                     output_name: str):
+    def result_export(self, output_name: str):
         """
         Create gff and multifasta files with all the extracted ORF
 
@@ -313,8 +300,8 @@ class ORFExtractor:
         gffFile = GffFile(output_name+".gff")
         fastaFile = FastaFile(output_name + ".fasta")
 
-        gffFile.write_orf_file(self.ORF_list)
-        fastaFile.write_orf_file(self.ORF_list)
+        gffFile.write_orf_file(self.ORF_dict)
+        fastaFile.write_orf_file(self.ORF_dict)
         self.output = output_name
 
     def blastx(self, database: str, outputfile: str, **kwargs):
@@ -410,6 +397,12 @@ class ORF:
         self._nested.append(orf)
 
     def to_dict_tuple(self):
+        """
+        DEPRECATED  a method to provide ORF properties as tuple
+
+        Returns: (ORF.id, ORF.seq, ORF.src, ORF.start_pos, ORF.end_pos, ORF.frame)
+
+        """
         return self.id, self.seq, self.src, self.start_pos, self.end_pos, self.frame
 
     def to_gff_tuple(self):
@@ -423,8 +416,8 @@ class ORF:
                 self.end_pos,
                 ".",
                 self.frame[0],
-                int(self.frame[-1]) - 1,
-                {"ID": self.id})
+                str(int(self.frame[-1]) - 1),
+                {"ID":self.id})
 
 
 

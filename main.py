@@ -1,9 +1,10 @@
 from matplotlib import pyplot as plt
-from ORFinfder import ORFExtractor
+from ORFinder import ORFExtractor
 
 
 fastaFileName = "Homo_sapiens_cdna_assembed.fasta"
-outputFileName = "/analysis/output/ORF_extracted"
+# outputFileName = "/analysis/output/ORF_extracted"
+outputFileName = "output/ORF_extracted"
 blastoutput = "/analysis/output/blast_results.tsv"
 blastdb = "/db/swissprot/swissprot"
 

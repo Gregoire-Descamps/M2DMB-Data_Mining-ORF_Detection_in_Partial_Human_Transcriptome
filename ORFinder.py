@@ -1,12 +1,15 @@
+from __future__ import annotations
 import FileFormats
 from typing import Union, Self
 import logging
+import os
 
 from Bio import SeqIO, SeqRecord
 from Bio.Seq import Seq
 from Bio.Data.CodonTable import standard_dna_table
 from Bio.Application import _Option
 from Bio.Blast.Applications import NcbiblastxCommandline
+
 
 from FileFormats import GffFile, FastaFile
 
@@ -25,10 +28,21 @@ class ORFExtractor:
         self.file_path: str = file
         self.seqIO: SeqIO.Iterable = self._load_seqio_fasta(file, "fasta")
         self.ORF_dict = {}
-        self.ORF_list: list[ORF] = []
         self.__seq_orf_list: list[ORF] = []
         self.non_orf_seq = 0
-        self.output = None
+
+        if os.path.exists("output"):
+            logging.warning("output directory already existing, file(s) inside might be replaced")
+        else:
+            os.mkdir("output")
+
+        self.output = False
+        self.gff_file = None
+        self.fasta_file = None
+        self.gff_handler = None
+        self.fasta_handler = None
+        self.__last_orf_id = 0
+
 
     def _load_seqio_fasta(self,
                           file: str,
@@ -165,6 +179,7 @@ class ORFExtractor:
                 stop_pos_list.pop(0)
 
             if stop_pos_list:
+                # correct end pos to the last nucleotide of the seqence
                 end_pos = stop_pos_list[0] + 2
                 # only process orf longer than trigger
                 if end_pos - init_pos > trigger:
@@ -173,8 +188,8 @@ class ORFExtractor:
                         alt_start.append(start_pos_list.pop(0))
                     if frame[0] == "+":
                         orf_seq = seq.seq[init_pos:end_pos + 1]
-                        self.__seq_orf_list.append(ORF(Seq(orf_seq), seq.id, init_pos + 1, end_pos + 1, frame))
-                        # self.__add_orf_to_dict(orf_seq, seq.id, init_pos + 1, end_pos + 1, frame)
+                        self.__seq_orf_list.append(ORF(seq=Seq(orf_seq), seq_id=seq.id, start_pos=init_pos + 1,
+                                                       end_pos=end_pos + 1, frame=frame, parent=seq))
 
                         # convert alt_start positions
                         alt_start = [x + 1 for x in alt_start]
@@ -183,7 +198,9 @@ class ORFExtractor:
                     else:
                         orf_seq = rev_seq.seq[init_pos:end_pos + 1]
                         self.__seq_orf_list.append(
-                            ORF(Seq(orf_seq), seq.id, len(seq) - end_pos, len(seq) - init_pos, frame))
+                            ORF(seq=Seq(orf_seq), seq_id=seq.id, start_pos=len(seq) - end_pos,
+                                end_pos=len(seq) - init_pos, frame=frame, parent=seq))
+
                         # self.__add_orf_to_dict(orf_seq, seq.id, len(seq) - end_pos, len(seq) - init_pos, frame)
 
                         # convert alt_start positions
@@ -198,6 +215,8 @@ class ORFExtractor:
         while len(self.__seq_orf_list) > 1:
             non_overlapping_orf: list[ORF] = []
             max_orf_length = 0
+            longest_orf = None
+            index_to_remove = None
             # select longest ORF
             index = 0
             for orf in self.__seq_orf_list:
@@ -222,30 +241,41 @@ class ORFExtractor:
                     longest_orf.add_nested_orf(orf)
                 else:
                     non_overlapping_orf.append(orf)
-            self.ORF_list.append(longest_orf)
+
+            # export orf entry to dict and output files
+            self.entry_export(longest_orf)
+
+
             self.__seq_orf_list = non_overlapping_orf
 
         if len(self.__seq_orf_list) == 1:
-            self.ORF_list.append(self.__seq_orf_list.pop(0))
+            self.entry_export(self.__seq_orf_list.pop(0))
 
         if len(self.__seq_orf_list) > 0:
             raise Exception("remaining sequences in the list at the end of aggregation, this shouldn't be the case")
 
-    def __add_orf_to_dict(self, orf: ORF):
-        """
-        Add ORF object into the ORF dict
-        """
-
-        self.ORF_dict[orf.id] = orf
 
     def extract(self):
         """
         Method to extract all ORF from the fasta file
         All information get stored in the ORF_dict of the object
+        Create output fasta and gff files
         :return: self.ORf_dict
         """
+        self.gff_file = GffFile("output/ORF_extract.gff")
+        self.fasta_file = FastaFile("output/ORF_extract.fasta")
+
+        self.gff_file.set_header(desc="Potential CDS entries extracted from human transcriptome assembly",
+                                 provider="Gregoire Descamps",
+                                 contact="gregÔire.desc@mps@thisisnotarealemail.com",
+                                 date="Today")
+
+        self.gff_handler = self.gff_file.open_file()
+        self.fasta_handler = self.fasta_file.open_file()
+
         max_seq_length = 0
         for seq in self.seqIO:  # type: SeqRecord.SeqRecord
+            self.gff_file.add_entry(seqid=seq.id, source="manual", seq_type="transcript", start=1, end=len(seq.seq), score=".", strand=".", phase=".", attributes={"ID": seq.id})
             rev_seq: SeqRecord = seq.reverse_complement()
             self.__seq_orf_list = []
             if len(seq.seq) > max_seq_length:
@@ -275,34 +305,30 @@ class ORFExtractor:
             # aggregate and filter  overlapping ORFs
             self.__aggregate_overlapping_orf()
 
-            if self.ORF_list[-1].src != seq.id:
+            if self.ORF_dict["ORF_"+str(self.__last_orf_id)].seq_id != seq.id:
                 self.non_orf_seq += 1
 
-        # add all saved ORF to dict
-        i = 1
-        for orf in self.ORF_list:
-            orf.id = "ORF_" + str(i)
-            self.__add_orf_to_dict(orf)
-            i += 1
+        # closing files
+        self.fasta_handler.close()
+        self.gff_handler.close()
 
-        # delete ORF list to release memory
-        self.ORF_list = []
-        
         return self.ORF_dict
 
-    def result_export(self, output_name: str):
+    def entry_export(self, orf: ORF):
         """
-        Create gff and multifasta files with all the extracted ORF
+        Append gff and multifasta files with the extracted ORF
 
         Args:
-            output_name: Name for the generated files
+            orf: an ORF object
         """
-        gffFile = GffFile(output_name+".gff")
-        fastaFile = FastaFile(output_name + ".fasta")
+        # set orf ID
+        self.__last_orf_id += 1
+        orf.set_id("ORF_" + str(self.__last_orf_id))
 
-        gffFile.write_orf_file(self.ORF_dict)
-        fastaFile.write_orf_file(self.ORF_dict)
-        self.output = output_name
+        # write entry to gff and fasta file and append orf to dict
+        self.gff_file.add_entry(*orf.to_gff_tuple(), open_file=self.gff_handler)
+        self.fasta_file.add_entry(*orf.to_fasta_tuple(), open_file=self.fasta_handler)
+        self.ORF_dict[orf.id] = orf
 
     def blastx(self, database: str, outputfile: str, **kwargs):
         """
@@ -333,7 +359,7 @@ class ORFExtractor:
             ))
 
         # add parameters to the biopython blastx object
-        bio_blast = NcbiblastxCommandline(query=self.output+".fasta", db = database, out=outputfile)
+        bio_blast = NcbiblastxCommandline(query=self.fasta_file.path, db = database, out=outputfile)
         bio_blast.parameters = bio_blast.parameters + extra_parameters
 
         for key, value in kwargs.items():
@@ -349,7 +375,7 @@ class ORF:
     Attributes:
 
     - :class:`Seq` seq -> The sequence of the ORF
-    - :class:`str` src -> the contig source id
+    - :class:`str` seq_id -> the contig source id
     - :class:`int` length -> length of the ORF sequence
     - :class:`int` start_pos -> position of the first ORF's base on the source contig
     - :class:`int` end_pos -> position of the last ORF's base on the source contig
@@ -367,20 +393,52 @@ class ORF:
 
     def __init__(self,
                  seq: Seq,
-                 src: str,
+                 seq_id: str,
                  start_pos: int,
                  end_pos: int,
-                 frame: str):
+                 src: str = "manual",
+                 score: str = ".",
+                 frame: str = ".",
+                 id: str = ".",
+                 parent: SeqRecord.SeqRecord = None,
+                 attributes: dict = None,
+                 seq_type: str = "ORF"):
 
         self.seq = seq
+        self.seq_id = seq_id
         self.src = src
         self.start_pos = start_pos
         self.end_pos = end_pos
+        self.score = score
         self.frame = frame
         self.length = end_pos - start_pos + 1
         self._alt_start = []
         self._nested: list[ORF] = []
-        self.id = None
+        self.id = id
+        self.parent = parent
+
+        # Append attributes
+        if attributes is not None:
+            self.attributes = attributes
+        else:
+            self.attributes = {}
+
+        # Add ID attribute
+        if self.id != "":
+            self.attributes["ID"] = self.id
+
+        # Add parent attribute
+        if parent is not None:
+            self.attributes["parent"] = parent.id
+
+        self.type = seq_type
+
+    def __len__(self):
+        return len(self.seq)
+
+    def set_id(self, id: str):
+        self.id = id
+        self.attributes["ID"] = id
 
     def add_alt_start(self, pos: Union[int, list[int]]):
         if isinstance(pos, list) and all(type(x) is int for x in pos):
@@ -400,25 +458,59 @@ class ORF:
         """
         DEPRECATED  a method to provide ORF properties as tuple
 
-        Returns: (ORF.id, ORF.seq, ORF.src, ORF.start_pos, ORF.end_pos, ORF.frame)
+        Returns: (ORF.id, ORF.seq, ORF.seq_id, ORF.start_pos, ORF.end_pos, ORF.frame)
 
         """
-        return self.id, self.seq, self.src, self.start_pos, self.end_pos, self.frame
+        return self.id, self.seq, self.seq_id, self.start_pos, self.end_pos, self.frame
 
     def to_gff_tuple(self):
         """
         :return: a tuple to fill a GffFile.add_entry method
         """
-        return (self.src,
-                "custom_ORF_finder",
-                "ORF",
+
+        if self.frame == ".":
+            phase = "."
+        else:
+            phase = str(int(self.frame[-1]) - 1)
+
+        return (self.seq_id,
+                "manual",
+                self.type,
                 self.start_pos,
                 self.end_pos,
-                ".",
+                self.score,
                 self.frame[0],
-                str(int(self.frame[-1]) - 1),
-                {"ID":self.id})
+                phase,
+                self.attributes)
+    def to_fasta_tuple(self):
+        """
+       :return: a tuple to fill a GffFile.add_entry method
+       """
+        desc = f"{self.seq_id}:{self.start_pos}-{self.end_pos}({self.frame[0]})"
+        return self.id, desc, self.seq
+
+    def to_CDS(self):
+        self.type = "CDS"
+
+        if self.frame[0] == "+":
+            start3 = 1
+            end3 = self.start_pos - 1
+            start5 = self.end_pos + 1
+            end5 = len(self.parent.seq)
+            seq3 = Seq(self.parent.seq[start3:end3 + 1])
+            seq5 = Seq(self.parent.seq[start5:end5 + 1])
 
 
+        else:
+            start3 = len(self.parent.seq)
+            end3 = self.end_pos + 1
+            start5 = self.start_pos - 1
+            end5 = 1
+            seq3 = Seq(self.parent.seq[end3:start3 + 1]).reverse_complement(inplace=True)
+            seq5 = Seq(self.parent.seq[end5:start5 + 1]).reverse_complement(inplace=True)
 
+        self.utr_3 = ORF(seq=seq3, seq_id=self.seq_id, start_pos=start3, end_pos=end3,
+                         frame=self.frame, id="UTR3a", parent=self.parent, attributes={})
+        self.utr_5 = ORF(seq=seq5, seq_id=self.seq_id, start_pos=start5, end_pos=end5,
+                         frame=self.frame, id="UTR5a", parent=self.parent, attributes={})
 

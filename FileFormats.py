@@ -38,7 +38,7 @@ class GffFile:
         file = open(path, "w")
         file.close()
 
-    def __open_file(self):
+    def open_file(self):
         return open(self.path, "a")
 
     def set_header(self, desc: str = "", provider: str = "", contact: str = "",
@@ -80,10 +80,12 @@ class GffFile:
                   strand: str = ".",
                   phase: Union[str, int] = ".",
                   attributes: Union[dict, str] = ".",
-                  open_file: io.TextIOWrapper = None) -> object:
+                  open_file: io.TextIOWrapper = None):
         """
             Append a new entry at the end of the file
 
+            :param seqid: The sequence id
+            :type seqid: str
             :param source: The source sequence id
             :type source: str
             :param seq_type:  type of sequence (gff categories)
@@ -100,8 +102,12 @@ class GffFile:
             :type phase: str
             :param attributes: Dictionary of sequence attributes (metadata)
             :type attributes: dict
+            :param open_file: A file object
+            :type open_file: str
 
             seqid (object):
+
+
 
         """
 
@@ -116,14 +122,14 @@ class GffFile:
         entry_string = f'{seqid}\t{source}\t{seq_type}\t{start}\t{end}\t{score}\t{strand}\t{phase}\t{attributes}\n'
 
         if not open_file:
-            with self.__open_file() as file:
+            with self.open_file() as file:
                 file.write(entry_string)
 
             file.close()
         else:
             open_file.write(entry_string)
 
-    def write_orf_file(self, orfEntries: Union[dict[ORFinfder.ORF], ORFinfder.ORF]):
+    def write_orf_file(self, orfEntries: Union[dict[ORFinder.ORF], ORFinder.ORF]):
         """
         A method to write a gff file from a list of ORF objects
 
@@ -137,12 +143,9 @@ class GffFile:
         if isinstance(orfEntries, ORFinder.ORF):
             orfEntries= {orfEntries.id: orfEntries}
 
-        self.set_header(desc="Potential CDS entries extracted from human transcriptome assembly",
-                              provider="Gregoire Descamps",
-                              contact="gregÔire.desc@mps@thisisnotarealemail.com",
-                              date="Today")
 
-        with self.__open_file() as file:
+
+        with self.open_file() as file:
             for orf in orfEntries.values():
                 self.add_entry(*orf.to_gff_tuple(), open_file = file)
         file.close()
@@ -166,13 +169,14 @@ class FastaFile:
         self.path = path
 
 
-    def __open_file(self):
+    def open_file(self):
         return open(self.path, "a")
 
     def add_entry(self,
                   seqid: str,
                   desc: str,
-                  seq: str):
+                  seq: str,
+                  open_file: io.TextIOWrapper = None):
 
         """
             Append a new entry at the end of the file
@@ -183,9 +187,19 @@ class FastaFile:
             """
 
         sequence = SeqRecord(seq,id = seqid, description= desc)
-        SeqIO.write(sequence, self.__open_file(), 'fasta')
 
-    def write_orf_file(self, orfEntries: Union[dict[ORFinfder.ORF], ORFinfder.ORF]):
+
+        if not open_file:
+            with self.open_file() as file:
+                SeqIO.write(sequence, file, 'fasta')
+            file.close()
+
+        else:
+            SeqIO.write(sequence, open_file, 'fasta')
+
+
+
+    def write_orf_file(self, orfEntries: Union[dict[ORFinder.ORF], ORFinder.ORF]):
         """
         A method to write a fasta file from a list of ORF objects
 
@@ -195,11 +209,11 @@ class FastaFile:
         """
         seq_list =[]
 
-        if isinstance(orfEntries, ORFinfder.ORF):
+        if isinstance(orfEntries, ORFinder.ORF):
             orfEntries = {orfEntries.id: orfEntries}
 
         for orf in orfEntries.values():
-            seq_list.append(SeqRecord(orf.seq, id=orf.id, description=f"{orf.src}:{orf.start_pos}-{orf.end_pos}({orf.frame[0]})"))
+            seq_list.append(SeqRecord(orf.seq, id=orf.id, description=f"{orf.seq_id}:{orf.start_pos}-{orf.end_pos}({orf.frame[0]})"))
 
 
         SeqIO.write(seq_list, self.path, "fasta")

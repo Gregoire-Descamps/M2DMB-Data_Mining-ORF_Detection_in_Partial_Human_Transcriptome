@@ -3,7 +3,7 @@ import logging
 import matplotlib
 from matplotlib import pyplot as plt
 from ORFinder import ORFExtractor
-
+import FileFormats
 matplotlib.set_loglevel("WARNING")
 
 fastaFileName = "Homo_sapiens_cdna_assembed.fasta"
@@ -16,6 +16,12 @@ blastdb = "/db/swissprot/swissprot"
 fasta_to_ORF = ORFExtractor(fastaFileName)
 ORF_Dict = fasta_to_ORF.extract()
 # fasta_to_ORF.blastx(database=blastdb, outputfile=blastoutput, taxids=9606, evalue=0.05, outfmt=7)
+fasta_to_ORF.orf_validate()
+
+
+# parser = FileFormats.BlastTsvFile(blastoutput)
+#
+# parser.top_hit_extract("output/test_top_hits2.tsv")
 
 max_length_dict = {}
 for key, orf in ORF_Dict.items():

@@ -31,6 +31,8 @@ class GffFile:
     def __init__(self, path):
         self.path = path
         self.__header: bool = False
+        self.__line : str = None
+        self.comment_lines: list[str] = []
 
         if os.path.exists(path):
             logging.warning(f'File {path} already exists and have been overwritten by GffFile object!')
@@ -38,7 +40,7 @@ class GffFile:
         file = open(path, "w")
         file.close()
 
-    def open_file(self):
+    def open_file(self) -> io.TextIOWrapper:
         return open(self.path, "a")
 
     def set_header(self, desc: str = "", provider: str = "", contact: str = "",
@@ -150,6 +152,41 @@ class GffFile:
                 self.add_entry(*orf.to_gff_tuple(), open_file = file)
         file.close()
 
+    def parse(self) -> dict:
+        """
+        A method that yields each gff result line
+         return features as dict.
+        Skips comment lines starting with '#'.
+        """
+        with open(self.path) as f:
+            for self.__line in f:
+                if self.__line.startswith("#"):
+                    self.comment_lines.append(self.__line.strip())
+                    continue
+
+                yield self._parse_line(self.__line.strip())
+                self.comment_lines = []
+
+    def _parse_line(self, line):
+        """
+                Parses a single line of gff.
+                Returns a dictionary of relevant fields.
+                """
+        fields = [
+            "seq_id", "src", "seq_type", "start",
+            "end", "score", "strand", "frame", "attribues"
+        ]
+
+        parts = line.split('\t')
+        attrib_field = parts[8]
+        attributes = dict(item.split('=') for item in attrib_field.split(';') if '=' in item)
+        parts[8] = attributes
+        return parts
+
+    def rename(self, name: str):
+        new_name = "/".join(self.path.split("/")[:-1]) + "/" + name
+        os.rename(self.path, new_name)
+        self.path = new_name
 
 class FastaFile:
     """
@@ -168,6 +205,11 @@ class FastaFile:
     def __init__(self, path):
         self.path = path
 
+        if os.path.exists(path):
+            logging.warning(f'File {path} already exists and have been overwritten by FastaFile object!')
+
+        file = open(path, "w")
+        file.close()
 
     def open_file(self):
         return open(self.path, "a")
@@ -249,15 +291,25 @@ class BlastTsvFile:
         with open(self.path, 'r') as f:
             for self.__line in f:
                 if self.__line.startswith("#"):
+                    # reset comment list for new entry
+                    if self.__line.startswith("# BLASTX "):
+                        self.comment_lines = []
+
+                    # append comment line
                     self.comment_lines.append(self.__line.strip())
-                    if len(self.comment_lines)>5:
-                        self.comment_lines = [self.comment_lines[-1]]
-                    if self.__line.startswith("# Query"):
+
+                    # Extract seq_id from query comment
+                    if self.__line.startswith("# Query:"):
                         src = self.__line.split(":")[1].split(" ")[2]
                     continue
 
-                yield src, self._parse_line(self.__line.strip())
-                self.comment_lines =[]
+                # return src and line dict if comment query found or just the line dict
+                try:
+                    yield src, self._parse_line(self.__line.strip())
+                except:
+                    yield "", self._parse_line(self.__line.strip())
+
+
 
     def _parse_line(self, line):
         """
@@ -274,36 +326,34 @@ class BlastTsvFile:
 
 
 
-    def top_hit_extract(self, outpath: str):
+    def top_hit_extract(self, outpath: str = None):
         """
         Yields the top hit per source (cdna) on best (lowest) e-value and store it in a new file.
         Assumes there is only one CDS per source (cdna)
+        if no path is provided replace the original file
         """
         best_hit = None
         best_comment = None
         cdna = None
+        inplace = False
+
+        if outpath is None:
+            outpath= "/".join(self.path.split("/")[0:-1]) + "/temp.tsv"
+            inplace = True
 
         with open(outpath,"wt") as fout:
             for src, hit in self.parse():
                 if src == cdna:
-                    #  TEST
-                    # print(f" type of q_start : {type(float(hit['q_start']))}")
-                    # print(f" value of q_start : {hit['q_start']}")
-                    # print(f" q_start % 3 : {float(hit['q_start'])%3}")
-                    # print(f"{float(hit['q_start']) < float(hit['q_end'])}")
-                    # print(f" type of evalue : {type(float(hit['evalue']))}")
-                    # print(f" value of evalue : {float(hit['evalue'])}")
-
-                    # END TEST
-
                     # checking for right frame
-                    if (float(hit["q_start"])<float(hit["q_end"])) and float(hit["q_start"])%3 == 1.0:
-                        if not best_hit or float(best_hit["evalue"]) > float(hit["evalue"]):
+                    if (int(hit["q_start"]) < int(hit["q_end"])) and int(hit["q_start"])%3 == 1.0:
+                        if not best_hit or (float(best_hit["evalue"]) > float(hit["evalue"])):
                             best_hit = hit
                             best_comment = self.comment_lines
-                    # else:
-                    #     fout.write("WRONG\t"+hit["query_id"]+"\n")
+
+
                 else:
+                    if best_comment == []:
+                        raise Exception(f"No comment found for CDS {best_hit['query_id']}")
                     # append best hit to gff output
                     # print(f"New source, from {cdna} to {src}\n{self.__line}Best hit\t{best_hit}\n")
                     if best_hit:
@@ -321,7 +371,13 @@ class BlastTsvFile:
                                    f"{best_hit['evalue']}\t"
                                    f"{best_hit['bit_score']}\n")
                     cdna = src
-                    best_hit = hit
+                    best_hit = None
                     best_comment = self.comment_lines
         fout.close()
+
+        if inplace == True:
+            os.remove(self.path)
+            os.rename(outpath,self.path)
+            return self
+
         return BlastTsvFile(outpath)

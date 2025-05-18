@@ -15,5 +15,7 @@ RUN wget https://ftp.ncbi.nlm.nih.gov/blast/db/v5/swissprot.tar.gz && \
     mkdir -p /db/swissprot && mv swissprot* /db/swissprot && \
     tar -xzvf /db/swissprot/swissprot.tar.gz -C /db/swissprot
 
+RUN export BLASTDB=/db/swissprot
+
 COPY . /app
 RUN pip install -r requirements.txt

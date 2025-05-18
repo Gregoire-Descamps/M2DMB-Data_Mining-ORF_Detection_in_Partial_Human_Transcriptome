@@ -1,11 +1,12 @@
 from __future__ import annotations
+import io
 import FileFormats
 from typing import Union, Self
 import logging
 import os
 
 from Bio import SeqIO, SeqRecord
-from Bio.Seq import Seq
+from Bio.Seq import Seq, MutableSeq
 from Bio.Data.CodonTable import standard_dna_table
 from Bio.Application import _Option
 from Bio.Blast.Applications import NcbiblastxCommandline
@@ -27,7 +28,7 @@ class ORFExtractor:
         # Initialize the dictionaries containing the ORFs
         self.file_path: str = file
         self.seqIO: SeqIO.Iterable = self._load_seqio_fasta(file, "fasta")
-        self.ORF_dict = {}
+        self.ORF_dict: dict[str,ORF] = {}
         self.__seq_orf_list: list[ORF] = []
         self.non_orf_seq = 0
 
@@ -37,12 +38,16 @@ class ORFExtractor:
             os.mkdir("output")
 
         self.output = False
-        self.gff_file = None
-        self.fasta_file = None
-        self.gff_handler = None
-        self.fasta_handler = None
-        self.__last_orf_id = 0
+        self.gff_file: FileFormats.GffFile = None
+        self.fasta_file: FileFormats.FastaFile = None
+        self.gff_handler: io.TextIOWrapper = None
+        self.fasta_handler: io.TextIOWrapper = None
+        self.__last_orf_id: int = 0
 
+        # self.blastresults: FileFormats.BlastTsvFile = None
+
+        # for test purpose (skip blastx)
+        self.blastresults: FileFormats.BlastTsvFile = FileFormats.BlastTsvFile("/analysis/output/blast_results.tsv")
 
     def _load_seqio_fasta(self,
                           file: str,
@@ -312,6 +317,8 @@ class ORFExtractor:
         self.fasta_handler.close()
         self.gff_handler.close()
 
+        self.output = True
+
         return self.ORF_dict
 
     def entry_export(self, orf: ORF):
@@ -359,13 +366,59 @@ class ORFExtractor:
             ))
 
         # add parameters to the biopython blastx object
-        bio_blast = NcbiblastxCommandline(query=self.fasta_file.path, db = database, out=outputfile)
+        bio_blast = NcbiblastxCommandline(query=self.fasta_file.path, db = database,
+                                          out=outputfile, num_threads=os.cpu_count()-2)
         bio_blast.parameters = bio_blast.parameters + extra_parameters
 
         for key, value in kwargs.items():
             bio_blast.set_parameter(key, value)
 
-        return bio_blast()
+        bio_blast()
+        self.blastresults = FileFormats.BlastTsvFile(outputfile)
+        return self.blastresults
+
+
+    def orf_validate(self):
+        self.blastresults.top_hit_extract()
+
+        for src, hit in self.blastresults.parse():
+            try:
+                self.ORF_dict[hit["query_id"]].to_CDS()
+                # add UniProtKB/Swiss-Prot Dbxref
+                self.ORF_dict[hit["query_id"]].add_attr({"Dbxref":"UniProtKB/Swiss-Prot:"+hit["subject_id"]})
+            except:
+                print(src, hit)
+                raise
+
+        self._gff_update()
+
+    def _gff_update(self):
+        tempfile = FileFormats.GffFile("output/temp.gff")
+        tempfile.set_header(desc="Potential CDS entries extracted from human transcriptome assembly",
+                            provider="Gregoire Descamps",
+                            contact="gregÔire.desc@mps@thisisnotarealemail.com",
+                            date="Today")
+
+        for entry in self.gff_file.parse():
+            id = entry[8]["ID"]
+            if id.startswith("cdna_"):
+                tempfile.add_entry(*entry)
+            else:
+                dict_entry=self.ORF_dict[id]
+                if dict_entry.type == "CDS":
+                    tempfile.add_entry(*dict_entry.utr_3.to_gff_tuple())
+                    tempfile.add_entry(*dict_entry.utr_5.to_gff_tuple())
+
+                # keep also putative ORFs
+                tempfile.add_entry(*dict_entry.to_gff_tuple())
+
+        gff_path = self.gff_file.path
+        os.remove(gff_path)
+        self.gff_file = tempfile.rename(gff_path.split("/")[-1])
+        return self
+
+
+
 
 
 class ORF:
@@ -418,7 +471,7 @@ class ORF:
         self.parent = parent
 
         # Append attributes
-        if attributes is not None:
+        if isinstance(attributes, dict):
             self.attributes = attributes
         else:
             self.attributes = {}
@@ -439,6 +492,23 @@ class ORF:
     def set_id(self, id: str):
         self.id = id
         self.attributes["ID"] = id
+
+    def add_attr(self, attr: Union[dict, tuple]):
+        """
+        Add attributes to the sequence, can be directly as dict or a tuple of (key, value)
+        Args:
+            attr: Attribute to add
+        """
+        if isinstance(attr, tuple) and len(attr) == 2:
+            self.attributes[attr[0]] = attr[1]
+
+        elif isinstance(attr, dict):
+            for key, value in attr.items():
+                self.attributes[key] = value
+
+        else:
+            raise Exception(f"The attribute doesn't have the right format, it should be a dict or a (key, value) pair."
+                            f"{type(attr)} was provided")
 
     def add_alt_start(self, pos: Union[int, list[int]]):
         if isinstance(pos, list) and all(type(x) is int for x in pos):
@@ -474,7 +544,7 @@ class ORF:
             phase = str(int(self.frame[-1]) - 1)
 
         return (self.seq_id,
-                "manual",
+                self.src,
                 self.type,
                 self.start_pos,
                 self.end_pos,
@@ -491,6 +561,8 @@ class ORF:
 
     def to_CDS(self):
         self.type = "CDS"
+        self.set_id("CDS_"+self.id.split("_")[1])
+        self.src = "BLASTX 2.16.0+"
 
         if self.frame[0] == "+":
             start3 = 1
@@ -506,11 +578,11 @@ class ORF:
             end3 = self.end_pos + 1
             start5 = self.start_pos - 1
             end5 = 1
-            seq3 = Seq(self.parent.seq[end3:start3 + 1]).reverse_complement(inplace=True)
-            seq5 = Seq(self.parent.seq[end5:start5 + 1]).reverse_complement(inplace=True)
+            seq3 = MutableSeq(self.parent.seq[end3:start3 + 1]).reverse_complement(inplace=True)
+            seq5 = MutableSeq(self.parent.seq[end5:start5 + 1]).reverse_complement(inplace=True)
 
-        self.utr_3 = ORF(seq=seq3, seq_id=self.seq_id, start_pos=start3, end_pos=end3,
+        self.utr_3 = ORF(seq=seq3, seq_id=self.seq_id, seq_type="UTR3", start_pos=start3, end_pos=end3,
                          frame=self.frame, id="UTR3a", parent=self.parent, attributes={})
-        self.utr_5 = ORF(seq=seq5, seq_id=self.seq_id, start_pos=start5, end_pos=end5,
+        self.utr_5 = ORF(seq=seq5, seq_id=self.seq_id, seq_type="UTR5", start_pos=start5, end_pos=end5,
                          frame=self.frame, id="UTR5a", parent=self.parent, attributes={})
 

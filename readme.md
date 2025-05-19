@@ -140,12 +140,12 @@ The average length of non matching ORF should be around 21 codons or 63 bp.
 ![ORF length distribution for the entire set](output/ORF_Length_Histogram.png)
 
 1. The ORF length distribution for the false positive ORFs
-![ORF length distribution for the false positive ORF](output/fp_ORF_Length_Histogram.png)
+![ORF length distribution for the false positive ORF](output/FP_ORF_Length_Histogram.png)
 
 1. The ORF length distribution for true positive ORFs (CDS) tend to be longer, 
 with distributions skewed to the right, reflecting the expected lengths of real coding sequences.
 
-![ORF length distribution for true positive ORF (CDS)](output/tp_ORF_Length_Histogram.png)
+![ORF length distribution for true positive ORF (CDS)](output/TP_ORF_Length_Histogram.png)
 
 
 ## 💬 Discussion

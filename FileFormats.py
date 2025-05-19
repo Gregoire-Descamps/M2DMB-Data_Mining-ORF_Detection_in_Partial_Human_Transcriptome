@@ -26,6 +26,8 @@ class GffFile:
         - set_header: -> Set the header information
         -  add_entry -> append a new line to the
         - write_orf_file -> write a gff file from a list of orf objects
+        - parse -> parse the gff file
+        - rename -> rename the gff file
         """
 
     def __init__(self, path):
@@ -171,6 +173,10 @@ class GffFile:
         """
                 Parses a single line of gff.
                 Returns a dictionary of relevant fields.
+
+        :param line:  a string corresponding to a file line
+
+        :return: Dict representing the entry
                 """
         fields = [
             "seq_id", "src", "seq_type", "start",
@@ -184,6 +190,11 @@ class GffFile:
         return parts
 
     def rename(self, name: str):
+        """
+        rename the gff file and update the path attribute
+
+        : param name: string corresponding to the new name
+        """
         new_name = "/".join(self.path.split("/")[:-1]) + "/" + name
         os.rename(self.path, new_name)
         self.path = new_name
@@ -272,6 +283,7 @@ class BlastTsvFile:
             Methods:
 
             - parse: -> Set the header information
+            - top_hit_extract -> extracts the best hit per query
             -  add_entry -> append a new line to the
             - write_orf_file -> write a gff file from a list of orf objects
             """

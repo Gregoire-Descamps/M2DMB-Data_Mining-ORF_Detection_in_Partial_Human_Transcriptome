@@ -4,6 +4,8 @@ import FileFormats
 from typing import Union, Self
 import logging
 import os
+import matplotlib
+from matplotlib import pyplot as plt
 
 from Bio import SeqIO, SeqRecord
 from Bio.Seq import Seq, MutableSeq
@@ -17,37 +19,54 @@ from FileFormats import GffFile, FastaFile
 # logging config
 logging.basicConfig(level=logging.DEBUG)
 
+# set matplotlib logging level to Warning
+matplotlib.set_loglevel("WARNING")
+
 
 class ORFExtractor:
+    """
+            A class that extract ORFs from fasta file
 
+        Attributes:
+
+        -  file: -> path to a fasta file
+
+        Methods:
+
+        - extract -> extract all ORF from the fasta file
+        - entry_export -> Append gff and multifasta files with an ORF
+        - blastx -> Run a blastx against the generated fasta file
+        - orf_validate -> A method to validate extracted ORF against Blast results
+        - orf_assessment -> a method that assess and print the pipeline results
+
+
+
+    """
     def __init__(self, file: str):
-        """
-        A class that extract ORFs from fasta file
-        :param file: path to a fasta file
-        """
+
         # Initialize the dictionaries containing the ORFs
         self.file_path: str = file
         self.seqIO: SeqIO.Iterable = self._load_seqio_fasta(file, "fasta")
+        self.source_len: int = 0
         self.ORF_dict: dict[str,ORF] = {}
         self.__seq_orf_list: list[ORF] = []
-        self.non_orf_seq = 0
+        self.non_orf_seq: int = 0
 
         if os.path.exists("output"):
             logging.warning("output directory already existing, file(s) inside might be replaced")
         else:
             os.mkdir("output")
 
-        self.output = False
-        self.gff_file: FileFormats.GffFile = None
-        self.fasta_file: FileFormats.FastaFile = None
-        self.gff_handler: io.TextIOWrapper = None
-        self.fasta_handler: io.TextIOWrapper = None
+        self.output: bool = False
+        self.validated: bool = False
+        self.gff_file: Union[FileFormats.GffFile, None] = None
+        self.fasta_file: Union[FileFormats.FastaFile, None] = None
+        self.gff_handler: Union[io.TextIOWrapper, None] = None
+        self.fasta_handler: Union[io.TextIOWrapper, None] = None
         self.__last_orf_id: int = 0
+        self.blastresults: FileFormats.BlastTsvFile = None
+        self.validated_orf: int = 0
 
-        # self.blastresults: FileFormats.BlastTsvFile = None
-
-        # for test purpose (skip blastx)
-        self.blastresults: FileFormats.BlastTsvFile = FileFormats.BlastTsvFile("/analysis/output/blast_results.tsv")
 
     def _load_seqio_fasta(self,
                           file: str,
@@ -225,9 +244,10 @@ class ORFExtractor:
             # select longest ORF
             index = 0
             for orf in self.__seq_orf_list:
-                if orf.length > max_orf_length:
+                if len(orf) > max_orf_length:
                     longest_orf = orf
                     index_to_remove = index
+                    max_orf_length = len(orf)
                 index += 1
 
             # remove the longest orf from list
@@ -280,6 +300,7 @@ class ORFExtractor:
 
         max_seq_length = 0
         for seq in self.seqIO:  # type: SeqRecord.SeqRecord
+            self.source_len +=1
             self.gff_file.add_entry(seqid=seq.id, source="manual", seq_type="transcript", start=1, end=len(seq.seq), score=".", strand=".", phase=".", attributes={"ID": seq.id})
             rev_seq: SeqRecord = seq.reverse_complement()
             self.__seq_orf_list = []
@@ -339,7 +360,7 @@ class ORFExtractor:
 
     def blastx(self, database: str, outputfile: str, **kwargs):
         """
-        Run a blastx against the source fasta file using Biopython NcbitblastxCommandline
+        Run a blastx against the generated fasta file using Biopython NcbitblastxCommandline
 
         Args:
             database: path to the blast database (should be a directory and not a file)
@@ -378,7 +399,15 @@ class ORFExtractor:
         return self.blastresults
 
 
-    def orf_validate(self):
+    def orf_validate(self) :
+        """
+        A method to validate extracted ORF against Blast results
+
+        """
+        if self.blastresults is None:
+            raise Exception("Unable to find an blastresults file used to validate ORFs. "
+                            "Please ensure blastx has run before running this method.")
+
         self.blastresults.top_hit_extract()
 
         for src, hit in self.blastresults.parse():
@@ -386,11 +415,14 @@ class ORFExtractor:
                 self.ORF_dict[hit["query_id"]].to_CDS()
                 # add UniProtKB/Swiss-Prot Dbxref
                 self.ORF_dict[hit["query_id"]].add_attr({"Dbxref":"UniProtKB/Swiss-Prot:"+hit["subject_id"]})
+                self.validated_orf += 1
             except:
                 print(src, hit)
                 raise
 
         self._gff_update()
+        self.validated = True
+
 
     def _gff_update(self):
         tempfile = FileFormats.GffFile("output/temp.gff")
@@ -417,6 +449,60 @@ class ORFExtractor:
         self.gff_file = tempfile.rename(gff_path.split("/")[-1])
         return self
 
+    def orf_assessment(self):
+        """
+            method to print a summary of the ORF extraction and validation pipeline and create ORF length distribution plots.
+        """
+        if not self.validated :
+            raise Exception(f"orf_validate was not run. validated property is {self.validated}"
+                            f"Please ensure run orf_validate before running this method.")
+        outpath = "/analysis/output/"
+
+        def length_distribution(len_dict: dict, title:str):
+            plt.hist(x=len_dict.values(), bins=range(300))
+            plt.title = title
+            plt.savefig(f"{outpath}{title}.png")
+            plt.clf()
+
+
+
+        global_length_dict: dict[str, int] = {}
+        fp_length_dict: dict[str, int] = {}
+        tp_length_dict: dict[str, int] = {}
+
+        for orf in self.ORF_dict.values():
+            ID: str = orf.id
+            length: int = len(orf)
+            global_length_dict[ID] = length
+
+            if ID.startswith("ORF_"):
+                fp_length_dict[ID] = length
+
+            else:
+                tp_length_dict[ID] = length
+
+
+        print(f"global dict length {len(global_length_dict)}\n"
+              f"true pos dict length {len(tp_length_dict)}\n"
+              f"false pos dict length {len(fp_length_dict)}\n")
+
+
+
+        print(f'\n\n---------- ORF Extractor Object from {self.file_path} ----------\n\n')
+        print(f"Total Sequences in source file : {self.source_len}\n")
+        print(f"Total ORF imputed : {len(self.ORF_dict)}\n")
+        print(f"Number of Sequences without ORF : {self.non_orf_seq}\n")
+        print(f"Overall Average ORF per Sequences: {(len(self.ORF_dict)/self.source_len)}\n")
+        print(f"Total ORF validated in CDS : {self.validated_orf}\n")
+        print(f"ORF imputation false positive rate = "
+              f"{(len(self.ORF_dict) - self.validated_orf) / len(self.ORF_dict) * 100}\n")
+        print(f"5 longest ORFs :{sorted(global_length_dict.items(), key=lambda i: i[1],reverse=True)[:6]}\n")
+        length_distribution(global_length_dict,"ORF_Length_Histogram")
+        print(f"global length distribution plot have been saved to {outpath}\n")
+        length_distribution(fp_length_dict, "FP_ORF_Length_Histogram")
+        print(f"false positive length distribution plot have been saved to {outpath}\n")
+        length_distribution(tp_length_dict, "TP_ORF_Length_Histogram")
+        print(f"true positive length distribution plot have been saved to {outpath}\n")
 
 
 
@@ -427,21 +513,28 @@ class ORF:
 
     Attributes:
 
-    - :class:`Seq` seq -> The sequence of the ORF
-    - :class:`str` seq_id -> the contig source id
-    - :class:`int` length -> length of the ORF sequence
-    - :class:`int` start_pos -> position of the first ORF's base on the source contig
-    - :class:`int` end_pos -> position of the last ORF's base on the source contig
-    - :class:`str` frame -> reading frame of the ORF
-    - :class:`list[int]` _alt_start -> position of alternative start codons within the ORF
-    - :class:`list[ORF]` _nested -> list of nested or overlapping ORFs in other reading frames
+    -  seq: -> The sequence of the ORF
+    -  seq_id -> the contig source id
+    - start_pos -> position of the first ORF's base on the source contig
+    - end_pos -> position of the last ORF's base on the source contig
+    - src -> the origin of the object (often the name of a program that generated the file)
+    - score -> the score of the sequence
+    - frame -> reading frame of the ORF
+    id -> seqeunce id
+    - parent -> a parent sequence object
+    - attributes -> a dict of attribute of the ORF (correspond to the last field in gff format)
+    - seq_type -> type of sequence (ORF, CDS, UTR, Transcript...)
 
     Methods:
 
+    - set_id ->  A method to set a new ID
+    - add_attr -> Add attributes to the sequence
     - add_alt_start -> Add alternative start codon(s) position in the ORF object
     - add_nested_orf -> Add nested ORF objects in the ORF object
     - to_dict_tuple -> Return OFR information as tuple for dictionary entry
     - to_gff_tuple -> Return OFR information as tuple for gff file entry
+    - to_fasta_tuple -> Return ORF information as tuple for fasta file entry
+    - to_CDS -> Modify object attributes to correspond to a gff CDS entry
     """
 
     def __init__(self,
@@ -464,7 +557,6 @@ class ORF:
         self.end_pos = end_pos
         self.score = score
         self.frame = frame
-        self.length = end_pos - start_pos + 1
         self._alt_start = []
         self._nested: list[ORF] = []
         self.id = id
@@ -490,6 +582,9 @@ class ORF:
         return len(self.seq)
 
     def set_id(self, id: str):
+        """
+            A method to set a new ID, update both self.id attribute and attribute dict value
+        """
         self.id = id
         self.attributes["ID"] = id
 
@@ -511,6 +606,11 @@ class ORF:
                             f"{type(attr)} was provided")
 
     def add_alt_start(self, pos: Union[int, list[int]]):
+        """
+            add alternative start position to the alt_start list
+        Args:
+            pos: the position of the alternative start codon
+        """
         if isinstance(pos, list) and all(type(x) is int for x in pos):
             for position in pos:
                 self._alt_start.append(position)
@@ -520,6 +620,11 @@ class ORF:
             raise TypeError(f"pos must be either int or list[int], not {type(pos)}")
 
     def add_nested_orf(self, orf: Self):
+        """
+            add nested ORF objects in the ORF object
+        Args:
+            orf: an orf object nested in the entry
+        """
         if not isinstance(orf, ORF):
             raise TypeError(f"orf must be an ORF object, not {type(orf)}")
         self._nested.append(orf)
@@ -535,6 +640,8 @@ class ORF:
 
     def to_gff_tuple(self):
         """
+        Return ORF information as tuple for gff file entry
+
         :return: a tuple to fill a GffFile.add_entry method
         """
 
@@ -554,12 +661,21 @@ class ORF:
                 self.attributes)
     def to_fasta_tuple(self):
         """
+        Return ORF information as tuple for fasta file entry
+
        :return: a tuple to fill a GffFile.add_entry method
        """
         desc = f"{self.seq_id}:{self.start_pos}-{self.end_pos}({self.frame[0]})"
         return self.id, desc, self.seq
 
     def to_CDS(self):
+        """
+        Modify object attributes to correspond to a gff CDS entry
+        Here BLASTX is automatically set as src
+        The CDS id keep the same number as the original ORF id
+        Create 5'UTR and 3'UTR as ORF object inside this object to print their annotation in gff file
+
+        """
         self.type = "CDS"
         self.set_id("CDS_"+self.id.split("_")[1])
         self.src = "BLASTX 2.16.0+"
